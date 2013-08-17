@@ -114,7 +114,3 @@ class SnapApi
     end
   end
 end
-
-s = SnapApi.new("akavi", "asasas")
-s.snaps
-puts s.blob("630542376284737900r")
