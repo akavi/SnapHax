@@ -3,6 +3,10 @@ require 'mcrypt'
 
 class SnapApi
   ENCRYPTION_KEY = "M02cnQ51Ji97vwT4"
+  TYPE_TO_CODE = {
+    jpeg: 0,
+    mp4: 1
+  }
 
   def initialize(username, password)
     @username = username
@@ -43,26 +47,70 @@ class SnapApi
       username: @username
     }
 
-    result = @client.post(path, params, @auth_token).parsed_response
+    result = @client.post(path, params, {}, @auth_token).parsed_response
     decrypt(result)
+  end
+
+  def upload(data, duration, recipients)
+    headers = {
+      "Content-type" => "multipart/form-data"
+    }
+
+    path = "/ph/upload"
+    params = {
+      username: @username,
+      type: TYPE_TO_CODE[format(data)],
+      data: encrypt(data),
+      duration: duration
+      media_id: @username.upcase + Time.now.to_i.to_s
+    }
+    @client.post(path, params, headers, @auth_token)
+
+    path = "/ph/send"
+    params = {
+      username: @username, 
+      time: duration,
+      media_id: media_id
+    }
+    recipients.each do |recipient| 
+      params[:recipient] = recipient
+      @client.post(path, params, headers, @auth_token)
+    end
   end
 
   private
 
   def decrypt(data)
-    return data if decrypted?(data)
+    return data unless encrypted?(data)
       
     crypter = Mcrypt.new(:rijndael_128, :ecb, ENCRYPTION_KEY)
     crypter.decrypt(data)
   end
 
-  def decrypted?(data)
+  def encrypt(data)
+    return data if encrypted?(data)
+
+    crypter = Mcrypt.new(:rijndael_128, :ecb, ENCRYPTION_KEY)
+    crypter.encrypt(data)
+  end
+
+  # to call this 'heuristic' would be a bit of an understatement
+  def format(data)
     first = data[0].ord
     second = data[1].ord
 
-    return (first == 0) || (first == 0xFF && second == 0xD8)
+    if first == 0 
+      return :mp4
+    elsif (first == 0xFF && second == 0xD8)
+      return :jpeg
+    else
+      return :encrypted
+    end
   end
 
+  def encrypted?(data)
+    format(data) == :encrypted
+  end
 
   class SnapClient
     CLIENT_PARAMS = {
@@ -77,14 +125,14 @@ class SnapApi
       @options = options.merge(CLIENT_PARAMS)
     end
 
-    def post(path, params, auth_token = nil)
+    def post(path, params = {}, headers = {}, auth_token = nil)
       auth_token ||= @options[:static_token]
       full_url = @options[:url] + path
 
       tstamp = timestamp
       params[:req_token] = hash(auth_token, tstamp)
       params[:timestamp] = tstamp
-      headers = {"User-Agent" => @options[:user_agent]}
+      headers["User-Agent"] = @options[:user_agent]
 
       HTTParty.post(full_url, {body: params, headers: headers})
     end
